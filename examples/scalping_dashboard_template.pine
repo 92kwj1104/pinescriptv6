@@ -1,0 +1,113 @@
+//@version=6
+indicator("Scalping Dashboard Template v6", overlay = true, max_labels_count = 200, max_lines_count = 100)
+
+// ─────────────────────────────────────────────────────────────
+// Purpose
+// 15m crypto scalping starter template for BTC / ETH / SOL / XRP.
+// This is not a guaranteed profitable system. Use it as a clean base.
+// ─────────────────────────────────────────────────────────────
+
+// Inputs
+fastLen = input.int(9, "Fast EMA", minval = 1)
+midLen = input.int(21, "Mid EMA", minval = 1)
+slowLen = input.int(50, "Slow EMA", minval = 1)
+rsiLen = input.int(14, "RSI Length", minval = 1)
+stochLen = input.int(14, "Stoch Length", minval = 1)
+stochSmooth = input.int(3, "Stoch Smooth", minval = 1)
+atrLen = input.int(14, "ATR Length", minval = 1)
+volLen = input.int(20, "Volume MA Length", minval = 1)
+stopAtrMult = input.float(1.3, "Stop ATR", minval = 0.1, step = 0.1)
+targetAtrMult = input.float(2.2, "Target ATR", minval = 0.1, step = 0.1)
+strictMode = input.bool(true, "Strict Confluence Mode")
+showLevels = input.bool(true, "Show Signal TP/SL Guide")
+showTable = input.bool(true, "Show Mobile Dashboard")
+confirmedOnly = input.bool(true, "Confirmed Bar Signals Only")
+
+// Core indicators
+emaFast = ta.ema(close, fastLen)
+emaMid = ta.ema(close, midLen)
+emaSlow = ta.ema(close, slowLen)
+rsi = ta.rsi(close, rsiLen)
+stochRaw = ta.stoch(close, high, low, stochLen)
+stochK = ta.sma(stochRaw, stochSmooth)
+atr = ta.atr(atrLen)
+volMa = ta.sma(volume, volLen)
+
+// Regime filters
+trendBull = emaFast > emaMid and emaMid > emaSlow and close > emaMid
+trendBear = emaFast < emaMid and emaMid < emaSlow and close < emaMid
+volOk = volume > volMa
+atrOk = atr > ta.sma(atr, atrLen)
+
+// Trigger logic
+pullbackLong = trendBull and close[1] < emaFast[1] and close > emaFast
+pullbackShort = trendBear and close[1] > emaFast[1] and close < emaFast
+momentumLong = rsi > 52 and stochK > 50
+momentumShort = rsi < 48 and stochK < 50
+breakoutLong = close > ta.highest(high, 10)[1]
+breakoutShort = close < ta.lowest(low, 10)[1]
+
+rawLong = strictMode ? pullbackLong and momentumLong and volOk and atrOk : (pullbackLong or breakoutLong) and momentumLong
+rawShort = strictMode ? pullbackShort and momentumShort and volOk and atrOk : (pullbackShort or breakoutShort) and momentumShort
+
+longSignal = confirmedOnly ? rawLong and barstate.isconfirmed : rawLong
+shortSignal = confirmedOnly ? rawShort and barstate.isconfirmed : rawShort
+
+// Signal-based guide levels, not actual strategy orders
+var float lastEntry = na
+var float lastStop = na
+var float lastTarget = na
+var string lastSide = "WAIT"
+
+if longSignal
+    lastEntry := close
+    lastStop := close - atr * stopAtrMult
+    lastTarget := close + atr * targetAtrMult
+    lastSide := "LONG"
+
+if shortSignal
+    lastEntry := close
+    lastStop := close + atr * stopAtrMult
+    lastTarget := close - atr * targetAtrMult
+    lastSide := "SHORT"
+
+// Visuals
+plot(emaFast, "Fast EMA")
+plot(emaMid, "Mid EMA", linewidth = 2)
+plot(emaSlow, "Slow EMA", linewidth = 2)
+
+plotshape(longSignal, "BUY", shape.labelup, location.belowbar, text = "BUY", size = size.small)
+plotshape(shortSignal, "SELL", shape.labeldown, location.abovebar, text = "SELL", size = size.small)
+
+plot(showLevels ? lastEntry : na, "Last Entry", style = plot.style_linebr)
+plot(showLevels ? lastStop : na, "Guide Stop", style = plot.style_linebr)
+plot(showLevels ? lastTarget : na, "Guide Target", style = plot.style_linebr)
+
+bgcolor(trendBull ? color.new(color.green, 93) : trendBear ? color.new(color.red, 93) : na)
+
+// Dashboard
+scoreLong = (trendBull ? 1 : 0) + (momentumLong ? 1 : 0) + (volOk ? 1 : 0) + (atrOk ? 1 : 0)
+scoreShort = (trendBear ? 1 : 0) + (momentumShort ? 1 : 0) + (volOk ? 1 : 0) + (atrOk ? 1 : 0)
+state = longSignal ? "BUY" : shortSignal ? "SELL" : trendBull ? "LONG WAIT" : trendBear ? "SHORT WAIT" : "NO TRADE"
+
+var table dash = table.new(position.top_right, 2, 7)
+
+if showTable and barstate.islast
+    table.cell(dash, 0, 0, "State")
+    table.cell(dash, 1, 0, state)
+    table.cell(dash, 0, 1, "Bias")
+    table.cell(dash, 1, 1, trendBull ? "BULL" : trendBear ? "BEAR" : "SIDE")
+    table.cell(dash, 0, 2, "L/S Score")
+    table.cell(dash, 1, 2, str.tostring(scoreLong) + " / " + str.tostring(scoreShort))
+    table.cell(dash, 0, 3, "RSI")
+    table.cell(dash, 1, 3, str.tostring(rsi, "#.0"))
+    table.cell(dash, 0, 4, "Stoch")
+    table.cell(dash, 1, 4, str.tostring(stochK, "#.0"))
+    table.cell(dash, 0, 5, "Vol/ATR")
+    table.cell(dash, 1, 5, (volOk ? "V✓" : "V×") + " " + (atrOk ? "A✓" : "A×"))
+    table.cell(dash, 0, 6, "Last")
+    table.cell(dash, 1, 6, lastSide)
+
+// Alerts
+alertcondition(longSignal, "Scalp BUY", "Scalp BUY on {{ticker}} {{interval}}")
+alertcondition(shortSignal, "Scalp SELL", "Scalp SELL on {{ticker}} {{interval}}")
