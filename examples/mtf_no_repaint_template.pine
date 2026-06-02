@@ -1,0 +1,73 @@
+//@version=6
+indicator("MTF No-Repaint Template v6", overlay = true)
+
+// ─────────────────────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────────────────────
+htf = input.timeframe("60", "Higher Timeframe")
+emaLen = input.int(50, "HTF EMA Length", minval = 1)
+rsiLen = input.int(14, "HTF RSI Length", minval = 1)
+showTable = input.bool(true, "Show MTF Dashboard")
+
+// ─────────────────────────────────────────────────────────────
+// Non-repainting higher timeframe helper
+// This pattern avoids using the unfinished HTF value on realtime bars.
+// ─────────────────────────────────────────────────────────────
+f_security_no_repaint(symbol, timeframeValue, expression) =>
+    indexHighTF = barstate.isrealtime ? 1 : 0
+    indexCurrTF = barstate.isrealtime ? 0 : 1
+    request.security(symbol, timeframeValue, expression[indexHighTF], lookahead = barmerge.lookahead_off)[indexCurrTF]
+
+// ─────────────────────────────────────────────────────────────
+// HTF data
+// ─────────────────────────────────────────────────────────────
+htfClose = f_security_no_repaint(syminfo.tickerid, htf, close)
+htfEma = f_security_no_repaint(syminfo.tickerid, htf, ta.ema(close, emaLen))
+htfRsi = f_security_no_repaint(syminfo.tickerid, htf, ta.rsi(close, rsiLen))
+
+htfBull = htfClose > htfEma and htfRsi > 50
+htfBear = htfClose < htfEma and htfRsi < 50
+
+// Local timeframe trigger
+fast = ta.ema(close, 20)
+slow = ta.ema(close, 50)
+localLong = ta.crossover(fast, slow)
+localShort = ta.crossunder(fast, slow)
+
+longSignal = localLong and htfBull and barstate.isconfirmed
+shortSignal = localShort and htfBear and barstate.isconfirmed
+
+// ─────────────────────────────────────────────────────────────
+// Visuals
+// ─────────────────────────────────────────────────────────────
+plot(fast, "Local Fast EMA")
+plot(slow, "Local Slow EMA")
+plot(htfEma, "HTF EMA", linewidth = 2)
+
+plotshape(longSignal, "MTF BUY", shape.labelup, location.belowbar, text = "MTF BUY", size = size.small)
+plotshape(shortSignal, "MTF SELL", shape.labeldown, location.abovebar, text = "MTF SELL", size = size.small)
+
+bgcolor(htfBull ? color.new(color.green, 92) : htfBear ? color.new(color.red, 92) : na)
+
+// ─────────────────────────────────────────────────────────────
+// Dashboard
+// ─────────────────────────────────────────────────────────────
+var table dash = table.new(position.top_right, 2, 5)
+
+if showTable and barstate.islast
+    table.cell(dash, 0, 0, "HTF")
+    table.cell(dash, 1, 0, htf)
+    table.cell(dash, 0, 1, "HTF Bias")
+    table.cell(dash, 1, 1, htfBull ? "BULL" : htfBear ? "BEAR" : "NEUTRAL")
+    table.cell(dash, 0, 2, "HTF RSI")
+    table.cell(dash, 1, 2, str.tostring(htfRsi, "#.0"))
+    table.cell(dash, 0, 3, "Local")
+    table.cell(dash, 1, 3, fast > slow ? "UP" : fast < slow ? "DOWN" : "SIDE")
+    table.cell(dash, 0, 4, "Signal")
+    table.cell(dash, 1, 4, longSignal ? "BUY" : shortSignal ? "SELL" : "WAIT")
+
+// ─────────────────────────────────────────────────────────────
+// Alerts
+// ─────────────────────────────────────────────────────────────
+alertcondition(longSignal, "MTF BUY", "MTF BUY on {{ticker}} {{interval}}")
+alertcondition(shortSignal, "MTF SELL", "MTF SELL on {{ticker}} {{interval}}")
