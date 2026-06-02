@@ -1,0 +1,85 @@
+//@version=6
+strategy("ATR TP/SL Strategy Template v6", overlay = true, initial_capital = 10000, pyramiding = 0, commission_type = strategy.commission.percent, commission_value = 0.05, slippage = 1)
+
+// ─────────────────────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────────────────────
+fastLen = input.int(20, "Fast EMA", minval = 1)
+slowLen = input.int(50, "Slow EMA", minval = 1)
+rsiLen = input.int(14, "RSI Length", minval = 1)
+atrLen = input.int(14, "ATR Length", minval = 1)
+stopAtrMult = input.float(1.5, "Stop ATR Multiplier", minval = 0.1, step = 0.1)
+targetAtrMult = input.float(3.0, "Target ATR Multiplier", minval = 0.1, step = 0.1)
+allowShort = input.bool(true, "Allow Short")
+confirmedOnly = input.bool(true, "Confirmed Bar Entries Only")
+
+// ─────────────────────────────────────────────────────────────
+// Calculations
+// ─────────────────────────────────────────────────────────────
+fast = ta.ema(close, fastLen)
+slow = ta.ema(close, slowLen)
+rsi = ta.rsi(close, rsiLen)
+atr = ta.atr(atrLen)
+
+trendUp = fast > slow
+trendDown = fast < slow
+
+rawLong = ta.crossover(fast, slow) and rsi > 50
+rawShort = ta.crossunder(fast, slow) and rsi < 50
+
+longSignal = confirmedOnly ? rawLong and barstate.isconfirmed : rawLong
+shortSignal = confirmedOnly ? rawShort and barstate.isconfirmed : rawShort
+
+// ─────────────────────────────────────────────────────────────
+// Entries
+// ─────────────────────────────────────────────────────────────
+if longSignal and strategy.position_size <= 0
+    strategy.entry("L", strategy.long)
+
+if allowShort and shortSignal and strategy.position_size >= 0
+    strategy.entry("S", strategy.short)
+
+// ─────────────────────────────────────────────────────────────
+// ATR stop/target exits
+// ─────────────────────────────────────────────────────────────
+longStop = strategy.position_avg_price - atr * stopAtrMult
+longTarget = strategy.position_avg_price + atr * targetAtrMult
+shortStop = strategy.position_avg_price + atr * stopAtrMult
+shortTarget = strategy.position_avg_price - atr * targetAtrMult
+
+if strategy.position_size > 0
+    strategy.exit("L TP/SL", from_entry = "L", stop = longStop, limit = longTarget)
+
+if strategy.position_size < 0
+    strategy.exit("S TP/SL", from_entry = "S", stop = shortStop, limit = shortTarget)
+
+// ─────────────────────────────────────────────────────────────
+// Plots
+// ─────────────────────────────────────────────────────────────
+plot(fast, "Fast EMA", linewidth = 2)
+plot(slow, "Slow EMA", linewidth = 2)
+plot(strategy.position_size > 0 ? longStop : na, "Long Stop", style = plot.style_linebr)
+plot(strategy.position_size > 0 ? longTarget : na, "Long Target", style = plot.style_linebr)
+plot(strategy.position_size < 0 ? shortStop : na, "Short Stop", style = plot.style_linebr)
+plot(strategy.position_size < 0 ? shortTarget : na, "Short Target", style = plot.style_linebr)
+
+plotshape(longSignal, "Long", shape.triangleup, location.belowbar, text = "L", size = size.tiny)
+plotshape(allowShort and shortSignal, "Short", shape.triangledown, location.abovebar, text = "S", size = size.tiny)
+
+// ─────────────────────────────────────────────────────────────
+// Performance dashboard
+// ─────────────────────────────────────────────────────────────
+var table perf = table.new(position.bottom_right, 2, 5)
+winRate = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100 : na
+
+if barstate.islast
+    table.cell(perf, 0, 0, "Closed")
+    table.cell(perf, 1, 0, str.tostring(strategy.closedtrades))
+    table.cell(perf, 0, 1, "Win %")
+    table.cell(perf, 1, 1, na(winRate) ? "n/a" : str.tostring(winRate, "#.0"))
+    table.cell(perf, 0, 2, "Net")
+    table.cell(perf, 1, 2, str.tostring(strategy.netprofit, "#.00"))
+    table.cell(perf, 0, 3, "Open P/L")
+    table.cell(perf, 1, 3, str.tostring(strategy.openprofit, "#.00"))
+    table.cell(perf, 0, 4, "Pos")
+    table.cell(perf, 1, 4, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT")
